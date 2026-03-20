@@ -1,0 +1,459 @@
+diff --git a/contrib/epee/include/net/abstract_tcp_server2.h b/contrib/epee/include/net/abstract_tcp_server2.h
+index a9d7fce11..ec00e6391 100644
+--- a/contrib/epee/include/net/abstract_tcp_server2.h
++++ b/contrib/epee/include/net/abstract_tcp_server2.h
+@@ -38,6 +38,7 @@
+ 
+ #include <string>
+ #include <vector>
++#include <functional>
+ #include <boost/noncopyable.hpp>
+ #include <boost/shared_ptr.hpp>
+ #include <atomic>
+@@ -81,7 +82,7 @@ namespace net_utils
+ 
+   struct i_connection_limit
+   {
+-    virtual bool is_host_limit(const epee::net_utils::network_address &address)=0;
++    virtual bool is_host_limit(const epee::net_utils::network_address &address, std::string* reject_reason = nullptr)=0;
+   protected:
+     virtual ~i_connection_limit(){}
+   };
+@@ -280,6 +281,7 @@ namespace net_utils
+ 
+       i_connection_filter* pfilter;
+       i_connection_limit* plimit;
++      std::function<void(const network_address&, const char*)> incoming_connection_callback;
+       std::size_t response_soft_limit;
+       bool stop_signal_sent;
+     };
+@@ -390,6 +392,7 @@ namespace net_utils
+ 
+     void set_connection_filter(i_connection_filter* pfilter);
+     void set_connection_limit(i_connection_limit* plimit);
++    void set_incoming_connection_callback(std::function<void(const network_address&, const char*)> cb);
+     void set_response_soft_limit(std::size_t limit);
+ 
+     void set_default_remote(epee::net_utils::network_address remote)
+diff --git a/contrib/epee/include/net/abstract_tcp_server2.inl b/contrib/epee/include/net/abstract_tcp_server2.inl
+index 29e070b68..2fafb750f 100644
+--- a/contrib/epee/include/net/abstract_tcp_server2.inl
++++ b/contrib/epee/include/net/abstract_tcp_server2.inl
+@@ -901,17 +901,34 @@ namespace net_utils
+         }
+       );
+     }
+-    auto *filter = static_cast<shared_state&>(
+-      connection_basic::get_state()
+-    ).pfilter;
++    auto &state = static_cast<shared_state&>(connection_basic::get_state());
++    auto *filter = state.pfilter;
++    auto *limit = state.plimit;
++    auto &incoming_cb = state.incoming_connection_callback;
++
++    if (is_income && incoming_cb)
++      incoming_cb(*real_remote, "ATTEMPT");
++
+     if (filter && !filter->is_remote_host_allowed(*real_remote))
++    {
++      if (is_income && incoming_cb)
++        incoming_cb(*real_remote, "REJECTED:blocked");
+       return false;
++    }
+ 
+-    auto *limit = static_cast<shared_state&>(
+-      connection_basic::get_state()
+-    ).plimit;
+-    if (is_income && limit && limit->is_host_limit(*real_remote))
+-      return false;
++    if (is_income && limit)
++    {
++      std::string reject_reason;
++      if (limit->is_host_limit(*real_remote, &reject_reason))
++      {
++        if (incoming_cb)
++        {
++          std::string event = "REJECTED:" + reject_reason;
++          incoming_cb(*real_remote, event.c_str());
++        }
++        return false;
++      }
++    }
+ 
+     ec_t ec;
+     #if !defined(_WIN32) || !defined(__i686)
+@@ -1405,6 +1422,13 @@ namespace net_utils
+     assert(m_state != nullptr); // always set in constructor
+     m_state->plimit = plimit;
+   }
++
++  template<class t_protocol_handler>
++  void boosted_tcp_server<t_protocol_handler>::set_incoming_connection_callback(std::function<void(const network_address&, const char*)> cb)
++  {
++    assert(m_state != nullptr);
++    m_state->incoming_connection_callback = std::move(cb);
++  }
+   //---------------------------------------------------------------------------------
+   template<class t_protocol_handler>
+   void boosted_tcp_server<t_protocol_handler>::set_response_soft_limit(const std::size_t limit)
+diff --git a/contrib/epee/include/net/http_server_impl_base.h b/contrib/epee/include/net/http_server_impl_base.h
+index e24391674..a136a7345 100644
+--- a/contrib/epee/include/net/http_server_impl_base.h
++++ b/contrib/epee/include/net/http_server_impl_base.h
+@@ -147,7 +147,7 @@ namespace epee
+ 
+   protected: 
+ 
+-    virtual bool is_host_limit(const net_utils::network_address& na) override final
++    virtual bool is_host_limit(const net_utils::network_address& na, std::string* reject_reason = nullptr) override final
+     {
+       auto& config = m_net_server.get_config_object();
+       CRITICAL_REGION_LOCAL(config.m_lock);
+diff --git a/contrib/epee/include/net/local_ip.h b/contrib/epee/include/net/local_ip.h
+index 6dfa19e6e..769cf4341 100644
+--- a/contrib/epee/include/net/local_ip.h
++++ b/contrib/epee/include/net/local_ip.h
+@@ -47,8 +47,8 @@ namespace epee
+       172.16.0.0 ... 172.31.255.255
+       192.168.0.0 ... 192.168.255.255
+       */
+-      if( (ip | 0xffffff00) == 0xffffff0a)
+-        return true;
++      // if( (ip | 0xffffff00) == 0xffffff0a)
++      //   return true;
+ 
+       if( (ip | 0xffff0000) == 0xffffa8c0)
+         return true;
+diff --git a/src/cryptonote_config.h b/src/cryptonote_config.h
+index 19b6f9ab8..9e1872f67 100644
+--- a/src/cryptonote_config.h
++++ b/src/cryptonote_config.h
+@@ -133,8 +133,8 @@
+ #define DEFAULT_RPC_SOFT_LIMIT_SIZE                     25 * 1024 * 1024 // 25 MiB
+ #define MAX_RPC_CONTENT_LENGTH                          1048576 // 1 MB
+ 
+-#define P2P_LOCAL_WHITE_PEERLIST_LIMIT                  1000
+-#define P2P_LOCAL_GRAY_PEERLIST_LIMIT                   5000
++#define P2P_LOCAL_WHITE_PEERLIST_LIMIT                  500
++#define P2P_LOCAL_GRAY_PEERLIST_LIMIT                   2500
+ 
+ #define P2P_DEFAULT_CONNECTIONS_COUNT                   12
+ #define P2P_DEFAULT_HANDSHAKE_INTERVAL                  60           //secondes
+diff --git a/src/p2p/incoming_connection_logger.cpp b/src/p2p/incoming_connection_logger.cpp
+new file mode 100644
+index 000000000..053c6ce78
+--- /dev/null
++++ b/src/p2p/incoming_connection_logger.cpp
+@@ -0,0 +1,99 @@
++// Copyright (c) 2014-2024, The Monero Project
++//
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without modification, are
++// permitted provided that the following conditions are met:
++//
++// 1. Redistributions of source code must retain the above copyright notice, this list of
++//    conditions and the following disclaimer.
++//
++// 2. Redistributions in binary form must reproduce the above copyright notice, this list
++//    of conditions and the following disclaimer in the documentation and/or other
++//    materials provided with the distribution.
++//
++// 3. Neither the name of the copyright holder nor the names of its contributors may be
++//    used to endorse or promote products derived from this software without specific
++//    prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
++// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
++// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
++// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++//
++// Incoming connection logger for experiment analysis.
++
++#include "incoming_connection_logger.h"
++#include <chrono>
++#include <iomanip>
++#include <sstream>
++
++namespace nodetool
++{
++
++incoming_connection_logger::~incoming_connection_logger()
++{
++}
++
++void incoming_connection_logger::init(const std::string& log_path)
++{
++  std::lock_guard<std::mutex> lock(m_mutex);
++  if (m_initialized)
++    return;
++  m_log_path = log_path;
++  m_initialized = true;
++}
++
++void incoming_connection_logger::write_line(const char* event, const std::string& address_str, const char* extra)
++{
++  if (!m_initialized || m_log_path.empty())
++    return;
++
++  auto now = std::chrono::system_clock::now();
++  auto sec = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
++  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
++
++  std::ostringstream line;
++  line << "[" << sec << "." << std::setfill('0') << std::setw(3) << ms << "] "
++       << event << " " << address_str;
++  if (extra && extra[0] != '\0')
++    line << " " << extra;
++  line << "\n";
++
++  std::ofstream f(m_log_path, std::ios::app);
++  if (f)
++    f << line.str();
++}
++
++void incoming_connection_logger::log_attempt(const std::string& address_str)
++{
++  std::lock_guard<std::mutex> lock(m_mutex);
++  write_line("INCOMING_ATTEMPT", address_str, nullptr);
++}
++
++void incoming_connection_logger::log_rejected(const std::string& address_str, const std::string& reason)
++{
++  std::lock_guard<std::mutex> lock(m_mutex);
++  std::string extra = "reason=" + reason;
++  write_line("INCOMING_REJECTED", address_str, extra.c_str());
++}
++
++void incoming_connection_logger::log_established(const std::string& address_str)
++{
++  std::lock_guard<std::mutex> lock(m_mutex);
++  write_line("INCOMING_ESTABLISHED", address_str, nullptr);
++}
++
++void incoming_connection_logger::log_closed(const std::string& address_str, const char* direction)
++{
++  std::lock_guard<std::mutex> lock(m_mutex);
++  std::string extra = std::string("direction=") + direction;
++  write_line("CONNECTION_CLOSED", address_str, extra.c_str());
++}
++
++} // namespace nodetool
+diff --git a/src/p2p/incoming_connection_logger.h b/src/p2p/incoming_connection_logger.h
+new file mode 100644
+index 000000000..30ba7188e
+--- /dev/null
++++ b/src/p2p/incoming_connection_logger.h
+@@ -0,0 +1,74 @@
++// Copyright (c) 2014-2024, The Monero Project
++//
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without modification, are
++// permitted provided that the following conditions are met:
++//
++// 1. Redistributions of source code must retain the above copyright notice, this list of
++//    conditions and the following disclaimer.
++//
++// 2. Redistributions in binary form must reproduce the above copyright notice, this list
++//    of conditions and the following disclaimer in the documentation and/or other
++//    materials provided with the distribution.
++//
++// 3. Neither the name of the copyright holder nor the names of its contributors may be
++//    used to endorse or promote products derived from this software without specific
++//    prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
++// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
++// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
++// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
++// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
++// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++//
++// Incoming connection logger for experiment analysis - logs to separate file only.
++
++#pragma once
++
++#include <string>
++#include <mutex>
++#include <fstream>
++
++namespace nodetool
++{
++
++/// Lightweight logger for incoming P2P connection events.
++/// Writes to a separate file to avoid polluting main Monero logs.
++/// Thread-safe, minimal lock hold time.
++class incoming_connection_logger
++{
++public:
++  incoming_connection_logger() = default;
++  ~incoming_connection_logger();
++
++  /// Initialize logger with log file path. Call once before use.
++  void init(const std::string& log_path);
++
++  /// Log incoming connection attempt.
++  void log_attempt(const std::string& address_str);
++
++  /// Log incoming connection rejected with reason.
++  void log_rejected(const std::string& address_str, const std::string& reason);
++
++  /// Log incoming connection established.
++  void log_established(const std::string& address_str);
++
++  /// Log connection closed (optional).
++  void log_closed(const std::string& address_str, const char* direction);
++
++  bool is_initialized() const { return m_initialized; }
++
++private:
++  void write_line(const char* event, const std::string& address_str, const char* extra = nullptr);
++
++  std::string m_log_path;
++  std::mutex m_mutex;
++  bool m_initialized{false};
++};
++
++} // namespace nodetool
+diff --git a/src/p2p/net_node.h b/src/p2p/net_node.h
+index 08db07604..9cdb87b00 100644
+--- a/src/p2p/net_node.h
++++ b/src/p2p/net_node.h
+@@ -57,6 +57,7 @@
+ #include "net/enums.h"
+ #include "net/fwd.h"
+ #include "common/command_line.h"
++#include "incoming_connection_logger.h"
+ 
+ PUSH_WARNINGS
+ DISABLE_VS_WARNINGS(4355)
+@@ -354,7 +355,7 @@ namespace nodetool
+     //----------------- i_connection_filter  --------------------------------------------------------
+     virtual bool is_remote_host_allowed(const epee::net_utils::network_address &address, time_t *t = NULL);
+     //----------------- i_connection_limit  ---------------------------------------------------------
+-    virtual bool is_host_limit(const epee::net_utils::network_address &address);
++    virtual bool is_host_limit(const epee::net_utils::network_address &address, std::string* reject_reason = nullptr);
+     //-----------------------------------------------------------------------------------------------
+ 
+     bool parse_peer_from_string(epee::net_utils::network_address& pe, const std::string& node_addr, uint16_t default_port = 0);
+@@ -522,6 +523,8 @@ namespace nodetool
+     bool m_enable_dns_blocklist;
+ 
+     uint32_t max_connections;
++
++    nodetool::incoming_connection_logger m_incoming_connection_logger;
+   };
+ 
+     const int64_t default_limit_up = P2P_DEFAULT_LIMIT_RATE_UP;      // kB/s
+diff --git a/src/p2p/net_node.inl b/src/p2p/net_node.inl
+index 916b9d093..5a018d412 100644
+--- a/src/p2p/net_node.inl
++++ b/src/p2p/net_node.inl
+@@ -31,6 +31,7 @@
+ // IP blocking adapted from Boolberry
+ 
+ #include <algorithm>
++#include <cstring>
+ #include <boost/bind/bind.hpp>
+ #include <boost/date_time/posix_time/posix_time.hpp>
+ #include <boost/filesystem/operations.hpp>
+@@ -225,17 +226,21 @@ namespace nodetool
+   }
+   //-----------------------------------------------------------------------------------
+   template<class t_payload_net_handler>
+-  bool node_server<t_payload_net_handler>::is_host_limit(const epee::net_utils::network_address &address)
++  bool node_server<t_payload_net_handler>::is_host_limit(const epee::net_utils::network_address &address, std::string* reject_reason)
+   {
+     const network_zone& zone = m_network_zones.at(address.get_zone());
+     if (zone.m_current_number_of_in_peers >= zone.m_config.m_net_config.max_in_connection_count) // in peers limit
+     {
++      if (reject_reason)
++        *reject_reason = "max_in_peers";
+       MWARNING("Exceeded max incoming connections, so dropping this one.");
+       return true;
+     }
+ 
+     if(has_too_many_connections(address))
+     {
++      if (reject_reason)
++        *reject_reason = "too_many_connections";
+       MWARNING("CONNECTION FROM " << address.host_str() << " REFUSED, too many connections from the same address");
+       return true;
+     }
+@@ -730,13 +735,17 @@ namespace nodetool
+     std::set<std::string> full_addrs;
+     if (m_nettype == cryptonote::TESTNET)
+     {
+-      full_addrs.insert("10.150.0.100:28080");
+-      full_addrs.insert("10.150.0.101:28080");
+-      full_addrs.insert("10.150.0.102:28080");
+-      full_addrs.insert("10.150.0.103:28080");
+-      full_addrs.insert("10.150.0.104:28080");
+-      full_addrs.insert("10.150.0.105:28080");
+-      full_addrs.insert("10.150.0.106:28080");
++      full_addrs.insert("10.150.0.71:28080");
++      full_addrs.insert("10.151.0.71:28080");
++      full_addrs.insert("10.152.0.71:28080");
++      full_addrs.insert("10.153.0.71:28080");
++      full_addrs.insert("10.154.0.71:28080");
++      full_addrs.insert("10.155.0.71:28080");
++      // full_addrs.insert("176.9.0.187:28080");
++      // full_addrs.insert("192.99.8.110:28080");
++      // full_addrs.insert("37.187.74.171:28080");
++      // full_addrs.insert("88.99.195.15:28080");
++      // full_addrs.insert("5.104.84.64:28080");
+     }
+     else if (m_nettype == cryptonote::STAGENET)
+     {
+@@ -962,6 +971,8 @@ namespace nodetool
+       m_config_folder = m_config_folder + "/" + public_zone.m_port;
+     }
+ 
++    m_incoming_connection_logger.init(m_config_folder + "/monero_incoming_connections.log");
++
+     res = init_config();
+     CHECK_AND_ASSERT_MES(res, false, "Failed to init config.");
+ 
+@@ -998,6 +1009,16 @@ namespace nodetool
+         std::string ipv6_port = "";
+         zone.second.m_net_server.set_connection_filter(this);
+         zone.second.m_net_server.set_connection_limit(this);
++        zone.second.m_net_server.set_incoming_connection_callback(
++          [this](const epee::net_utils::network_address& addr, const char* event) {
++            if (!m_incoming_connection_logger.is_initialized())
++              return;
++            const std::string addr_str = addr.host_str();
++            if (std::strcmp(event, "ATTEMPT") == 0)
++              m_incoming_connection_logger.log_attempt(addr_str);
++            else if (std::strncmp(event, "REJECTED:", 9) == 0)
++              m_incoming_connection_logger.log_rejected(addr_str, event + 9);
++          });
+         MINFO("Binding (IPv4) on " << zone.second.m_bind_ip << ":" << zone.second.m_port);
+         if (!zone.second.m_bind_ipv6_address.empty() && m_use_ipv6)
+         {
+@@ -2774,12 +2795,16 @@ namespace nodetool
+   template<class t_payload_net_handler>
+   void node_server<t_payload_net_handler>::on_connection_new(p2p_connection_context& context)
+   {
++    if (context.m_is_income && m_incoming_connection_logger.is_initialized())
++      m_incoming_connection_logger.log_established(context.m_remote_address.host_str());
+     MINFO("["<< epee::net_utils::print_connection_context(context) << "] NEW CONNECTION");
+   }
+   //-----------------------------------------------------------------------------------
+   template<class t_payload_net_handler>
+   void node_server<t_payload_net_handler>::on_connection_close(p2p_connection_context& context)
+   {
++    if (context.m_is_income && m_incoming_connection_logger.is_initialized())
++      m_incoming_connection_logger.log_closed(context.m_remote_address.host_str(), "IN");
+     network_zone& zone = m_network_zones.at(context.m_remote_address.get_zone());
+     if (!zone.m_net_server.is_stop_signal_sent() && !context.m_is_income) {
+       epee::net_utils::network_address na = AUTO_VAL_INIT(na);
