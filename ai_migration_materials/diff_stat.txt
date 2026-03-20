@@ -1,0 +1,10 @@
+ contrib/epee/include/net/abstract_tcp_server2.h   |  5 +-
+ contrib/epee/include/net/abstract_tcp_server2.inl | 40 +++++++--
+ contrib/epee/include/net/http_server_impl_base.h  |  2 +-
+ contrib/epee/include/net/local_ip.h               |  4 +-
+ src/cryptonote_config.h                           |  4 +-
+ src/p2p/incoming_connection_logger.cpp            | 99 +++++++++++++++++++++++
+ src/p2p/incoming_connection_logger.h              | 74 +++++++++++++++++
+ src/p2p/net_node.h                                |  5 +-
+ src/p2p/net_node.inl                              | 41 ++++++++--
+ 9 files changed, 251 insertions(+), 23 deletions(-)
