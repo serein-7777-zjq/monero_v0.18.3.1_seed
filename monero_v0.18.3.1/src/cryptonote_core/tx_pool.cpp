@@ -244,6 +244,21 @@ namespace cryptonote
       if(have_tx_keyimges_as_spent(tx, id))
       {
         mark_double_spend(tx);
+        {
+          std::string log_line = "[DOUBLE_SPEND_DETECTED] tx_id=" + epee::string_tools::pod_to_hex(id)
+            + " timestamp=" + std::to_string(static_cast<uint64_t>(time(nullptr)))
+            + " kept_by_block=" + (kept_by_block ? "1" : "0");
+          size_t ki_idx = 0;
+          for (const auto& in : tx.vin)
+          {
+            if (in.type() != typeid(txin_to_key))
+              continue;
+            const txin_to_key& tokey_in = boost::get<txin_to_key>(in);
+            log_line += " key_image[" + std::to_string(ki_idx) + "]=" + epee::string_tools::pod_to_hex(tokey_in.k_image);
+            ++ki_idx;
+          }
+          LOG_PRINT_L0(log_line);
+        }
         LOG_PRINT_L1("Transaction with id= "<< id << " used already spent key images");
         tvc.m_verifivation_failed = true;
         tvc.m_double_spend = true;
