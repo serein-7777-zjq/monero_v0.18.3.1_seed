@@ -24,7 +24,12 @@ COPY . .
 
 ARG NPROC
 RUN set -ex && \
-    git submodule init && git submodule update && \
+    if [ -e .git ] ; then git submodule update --init --recursive ; fi && \
+    test -d external/miniupnp && \
+    test -d external/randomx && \
+    test -d external/rapidjson && \
+    test -d external/supercop && \
+    test -d external/trezor-common && \
     rm -rf build && \
     if [ -z "$NPROC" ] ; \
     then make -j$(nproc) depends target=x86_64-linux-gnu ; \
