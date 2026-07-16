@@ -58,7 +58,6 @@
 #include "net/enums.h"
 #include "net/fwd.h"
 #include "common/command_line.h"
-#include "incoming_connection_logger.h"
 
 PUSH_WARNINGS
 DISABLE_VS_WARNINGS(4355)
@@ -530,8 +529,6 @@ namespace nodetool
     bool m_enable_dns_blocklist;
 
     uint32_t max_connections;
-
-    nodetool::incoming_connection_logger m_incoming_connection_logger;
   };
 
     const int64_t default_limit_up = P2P_DEFAULT_LIMIT_RATE_UP;      // kB/s

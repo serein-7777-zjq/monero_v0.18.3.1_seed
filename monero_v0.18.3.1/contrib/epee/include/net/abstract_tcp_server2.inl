@@ -871,15 +871,9 @@ namespace net_utils
     auto &state = static_cast<shared_state&>(connection_basic::get_state());
     auto *filter = state.pfilter;
     auto *limit = state.plimit;
-    auto &incoming_cb = state.incoming_connection_callback;
-
-    if (is_income && incoming_cb)
-      incoming_cb(*real_remote, "ATTEMPT");
 
     if (filter && !filter->is_remote_host_allowed(*real_remote))
     {
-      if (is_income && incoming_cb)
-        incoming_cb(*real_remote, "REJECTED:blocked");
       return false;
     }
 
@@ -888,11 +882,6 @@ namespace net_utils
       std::string reject_reason;
       if (limit->is_host_limit(*real_remote, &reject_reason))
       {
-        if (incoming_cb)
-        {
-          std::string event = "REJECTED:" + reject_reason;
-          incoming_cb(*real_remote, event.c_str());
-        }
         return false;
       }
     }
@@ -1381,13 +1370,6 @@ namespace net_utils
   {
     assert(m_state != nullptr);
     m_state->plimit = plimit;
-  }
-  //---------------------------------------------------------------------------------
-  template<class t_protocol_handler>
-  void boosted_tcp_server<t_protocol_handler>::set_incoming_connection_callback(std::function<void(const network_address&, const char*)> cb)
-  {
-    assert(m_state != nullptr);
-    m_state->incoming_connection_callback = std::move(cb);
   }
   //---------------------------------------------------------------------------------
   template<class t_protocol_handler>

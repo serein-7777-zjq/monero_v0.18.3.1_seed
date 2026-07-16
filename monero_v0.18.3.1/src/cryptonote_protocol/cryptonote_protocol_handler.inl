@@ -43,8 +43,6 @@
 #include "net/network_throttle-detail.hpp"
 #include "common/pruning.h"
 #include "common/util.h"
-#include "p2p/outbound_connection_logger.h"
-#include <sstream>
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "net.cn"
@@ -63,8 +61,6 @@
 
 #define MLOG_PEER_STATE(x) \
   MCINFO(MONERO_DEFAULT_LOG_CATEGORY, context << "[" << epee::string_tools::to_string_hex(context.m_pruning_seed) << "] state: " << x << " in state " << cryptonote::get_protocol_state_string(context.m_state))
-
-#define OUTBOUND_DBG_CN(x) do { std::ostringstream _odb; _odb << x; nodetool::outbound_debug_log(_odb.str()); } while(0)
 
 #define BLOCK_QUEUE_NSPANS_THRESHOLD 10 // chunks of N blocks
 #define BLOCK_QUEUE_SIZE_THRESHOLD (100*1024*1024) // MB
@@ -2956,8 +2952,6 @@ skip:
     }
 
     m_block_queue.flush_spans(context.m_connection_id, false);
-    if (!context.m_is_income && context.m_state == cryptonote_connection_context::state_before_handshake)
-      OUTBOUND_DBG_CN("OUT connection closed in before_handshake -> likely BACK_PING_PROBE (1003-only temp conn) " << context.m_remote_address.str());
     MLOG_PEER_STATE("closed");
   }
 

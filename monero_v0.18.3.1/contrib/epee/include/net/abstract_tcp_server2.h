@@ -272,7 +272,6 @@ namespace net_utils
 
       i_connection_filter* pfilter;
       i_connection_limit* plimit;
-      std::function<void(const network_address&, const char*)> incoming_connection_callback;
       bool stop_signal_sent;
     };
 
@@ -381,7 +380,6 @@ namespace net_utils
 
     void set_connection_filter(i_connection_filter* pfilter);
     void set_connection_limit(i_connection_limit* plimit);
-    void set_incoming_connection_callback(std::function<void(const network_address&, const char*)> cb);
 
     void set_default_remote(epee::net_utils::network_address remote)
     {
