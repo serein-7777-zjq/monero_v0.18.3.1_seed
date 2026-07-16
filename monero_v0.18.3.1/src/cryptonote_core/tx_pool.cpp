@@ -245,19 +245,19 @@ namespace cryptonote
       {
         mark_double_spend(tx);
         {
-          std::string log_line = "[DOUBLE_SPEND_DETECTED] tx_id=" + epee::string_tools::pod_to_hex(id)
-            + " timestamp=" + std::to_string(static_cast<uint64_t>(time(nullptr)))
-            + " kept_by_block=" + (kept_by_block ? "1" : "0");
-          size_t ki_idx = 0;
+          std::vector<std::string> key_images_hex;
           for (const auto& in : tx.vin)
           {
             if (in.type() != typeid(txin_to_key))
               continue;
             const txin_to_key& tokey_in = boost::get<txin_to_key>(in);
-            log_line += " key_image[" + std::to_string(ki_idx) + "]=" + epee::string_tools::pod_to_hex(tokey_in.k_image);
-            ++ki_idx;
+            key_images_hex.push_back(epee::string_tools::pod_to_hex(tokey_in.k_image));
           }
-          LOG_PRINT_L0(log_line);
+          m_double_spend_logger.log_double_spend(
+            epee::string_tools::pod_to_hex(id),
+            static_cast<uint64_t>(time(nullptr)),
+            kept_by_block,
+            key_images_hex);
         }
         LOG_PRINT_L1("Transaction with id= "<< id << " used already spent key images");
         tvc.m_verifivation_failed = true;
@@ -432,6 +432,11 @@ namespace cryptonote
   {
     CRITICAL_REGION_LOCAL(m_transactions_lock);
     m_txpool_max_weight = bytes;
+  }
+  //---------------------------------------------------------------------------------
+  void tx_memory_pool::set_double_spend_log_path(const std::string& path)
+  {
+    m_double_spend_logger.init(path);
   }
   //---------------------------------------------------------------------------------
   void tx_memory_pool::reduce_txpool_weight(size_t weight)

@@ -569,6 +569,8 @@ namespace levin
           }
 
           MERROR("Unable to send transaction(s) via Dandelion++ stem");
+          // 模拟恶意节点能够被选择为stem阶段后继节点的情况, 否则节点将直接以fluff的方式发送该交易了
+          return;
         }
 
         core_->on_transactions_relayed(epee::to_span(txs_), relay_method::fluff);

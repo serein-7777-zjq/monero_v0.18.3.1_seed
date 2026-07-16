@@ -683,6 +683,8 @@ namespace cryptonote
     r = m_mempool.init(max_txpool_weight, m_nettype == FAKECHAIN);
     CHECK_AND_ASSERT_MES(r, false, "Failed to initialize memory pool");
 
+    m_mempool.set_double_spend_log_path(m_config_folder + "/monero_double_spend.log");
+
     // now that we have a valid m_blockchain_storage, we can clean out any
     // transactions in the pool that do not conform to the current fork
     m_mempool.validate(m_blockchain_storage.get_current_hard_fork_version());

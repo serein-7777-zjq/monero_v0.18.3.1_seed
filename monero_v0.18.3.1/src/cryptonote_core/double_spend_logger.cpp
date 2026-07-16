@@ -26,22 +26,22 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Incoming connection logger for experiment analysis.
+// Double spend logger for experiment analysis.
 
-#include "incoming_connection_logger.h"
+#include "double_spend_logger.h"
 #include <boost/filesystem.hpp>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
 
-namespace nodetool
+namespace cryptonote
 {
 
-incoming_connection_logger::~incoming_connection_logger()
+double_spend_logger::~double_spend_logger()
 {
 }
 
-void incoming_connection_logger::init(const std::string& log_path)
+void double_spend_logger::init(const std::string& log_path)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
   if (m_initialized)
@@ -58,27 +58,25 @@ void incoming_connection_logger::init(const std::string& log_path)
     {
       auto now = std::chrono::system_clock::now();
       auto sec = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-      f << "[" << sec << ".000] LOG_STARTED incoming_connections\n";
+      f << "[" << sec << ".000] LOG_STARTED double_spend\n";
     }
   }
   catch (...) {}
   m_initialized = true;
 }
 
-void incoming_connection_logger::write_line(const char* event, const std::string& address_str, const char* extra)
+void double_spend_logger::log_double_spend(const std::string& tx_id_hex, uint64_t timestamp, bool kept_by_block, const std::vector<std::string>& key_images_hex)
 {
+  std::lock_guard<std::mutex> lock(m_mutex);
   if (!m_initialized || m_log_path.empty())
     return;
 
-  auto now = std::chrono::system_clock::now();
-  auto sec = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
-
   std::ostringstream line;
-  line << "[" << sec << "." << std::setfill('0') << std::setw(3) << ms << "] "
-       << event << " " << address_str;
-  if (extra && extra[0] != '\0')
-    line << " " << extra;
+  line << "[DOUBLE_SPEND_DETECTED] tx_id=" << tx_id_hex
+       << " timestamp=" << timestamp
+       << " kept_by_block=" << (kept_by_block ? "1" : "0");
+  for (size_t i = 0; i < key_images_hex.size(); ++i)
+    line << " key_image[" << i << "]=" << key_images_hex[i];
   line << "\n";
 
   std::ofstream f(m_log_path, std::ios::app);
@@ -86,30 +84,4 @@ void incoming_connection_logger::write_line(const char* event, const std::string
     f << line.str();
 }
 
-void incoming_connection_logger::log_attempt(const std::string& address_str)
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  write_line("INCOMING_ATTEMPT", address_str, nullptr);
-}
-
-void incoming_connection_logger::log_rejected(const std::string& address_str, const std::string& reason)
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  std::string extra = "reason=" + reason;
-  write_line("INCOMING_REJECTED", address_str, extra.c_str());
-}
-
-void incoming_connection_logger::log_established(const std::string& address_str)
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  write_line("INCOMING_ESTABLISHED", address_str, nullptr);
-}
-
-void incoming_connection_logger::log_closed(const std::string& address_str, const char* direction)
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  std::string extra = std::string("direction=") + direction;
-  write_line("CONNECTION_CLOSED", address_str, extra.c_str());
-}
-
-} // namespace nodetool
+} // namespace cryptonote

@@ -49,6 +49,7 @@
 #include "cryptonote_protocol/enums.h"
 #include "blockchain_db/blockchain_db.h"
 #include "crypto/hash.h"
+#include "double_spend_logger.h"
 #include "rpc/core_rpc_server_commands_defs.h"
 #include "rpc/message_data_structs.h"
 
@@ -413,6 +414,13 @@ namespace cryptonote
     void set_txpool_max_weight(size_t bytes);
 
     /**
+     * @brief set path for dedicated double spend log file
+     *
+     * @param path full path to log file (e.g. data_dir/monero_double_spend.log)
+     */
+    void set_double_spend_log_path(const std::string& path);
+
+    /**
      * @brief reduce the cumulative txpool weight by the weight provided
      *
      * @param weight the weight to reduce the total txpool weight by
@@ -669,6 +677,8 @@ private:
     size_t m_txpool_max_weight;
     size_t m_txpool_weight;
     bool m_mine_stem_txes;
+
+    double_spend_logger m_double_spend_logger;
 
     mutable std::unordered_map<crypto::hash, std::tuple<bool, tx_verification_context, uint64_t, crypto::hash>> m_input_cache;
 

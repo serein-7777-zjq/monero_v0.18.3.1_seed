@@ -114,12 +114,21 @@ namespace nodetool
     p2p_connection_context_t()
       : peer_id(0),
         support_flags(0),
-        m_in_timedsync(false)
+        m_in_timedsync(false),
+        is_ping(false)
+    {}
+
+    explicit p2p_connection_context_t(bool is_ping)
+      : peer_id(0),
+        support_flags(0),
+        m_in_timedsync(false),
+        is_ping(is_ping)
     {}
 
     peerid_type peer_id;
     uint32_t support_flags;
     bool m_in_timedsync;
+    bool is_ping;
     std::set<epee::net_utils::network_address> sent_addresses;
   };
 
